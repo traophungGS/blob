@@ -1,0 +1,1236 @@
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>3D Liquid Resin Studio</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: #ebe9e4;
+      touch-action: none;
+    }
+    #canvas-container {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 1;
+      cursor: none;
+    }
+    @media (pointer: coarse) {
+      #canvas-container {
+        cursor: crosshair;
+      }
+      #nozzle-overlay {
+        display: none !important;
+      }
+    }
+    /* Custom Nozzle Cursor Overlay */
+    #nozzle-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 240px;
+      height: 240px;
+      pointer-events: none;
+      z-index: 30;
+      transform-origin: 18px 18px;
+      will-change: transform;
+      filter: drop-shadow(10px 18px 14px rgba(0, 0, 0, 0.22));
+      transition: opacity 0.15s ease;
+    }
+    /* Glassmorphism Craft Toolbar */
+    .craft-panel {
+      background: rgba(255, 255, 255, 0.84);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border: 1px solid rgba(255, 255, 255, 0.65);
+      box-shadow: 0 12px 36px -6px rgba(15, 23, 42, 0.14), 0 4px 12px -2px rgba(15, 23, 42, 0.06);
+    }
+    .swatch-btn {
+      transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.18s ease;
+    }
+    .swatch-btn:hover {
+      transform: scale(1.12);
+    }
+    .swatch-btn.active {
+      transform: scale(1.16);
+      box-shadow: 0 0 0 2.5px #ffffff, 0 0 0 4.5px #1e293b;
+    }
+    /* Toast notification */
+    #toast {
+      transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    /* Hide custom scrollbar on mobile toolbar */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Main WebGL Canvas Container -->
+  <div id="canvas-container"></div>
+
+  <!-- Realistic Semi-Transparent Plastic Applicator Nozzle Cursor -->
+  <div id="nozzle-overlay" aria-hidden="true">
+    <svg viewBox="0 0 240 240" width="240" height="240" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <!-- Translucent plastic outer shell gradient -->
+        <linearGradient id="plasticBody" x1="0%" y1="100%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="rgba(255,255,255,0.65)" />
+          <stop offset="28%" stop-color="rgba(235,240,245,0.28)" />
+          <stop offset="68%" stop-color="rgba(210,220,230,0.22)" />
+          <stop offset="92%" stop-color="rgba(255,255,255,0.72)" />
+          <stop offset="100%" stop-color="rgba(180,190,200,0.45)" />
+        </linearGradient>
+        <!-- Inner colored liquid gel gradient -->
+        <linearGradient id="innerGel" x1="0%" y1="100%" x2="100%" y2="0%">
+          <stop offset="0%" id="gelStop1" stop-color="#84cc16" stop-opacity="0.92" />
+          <stop offset="50%" id="gelStop2" stop-color="#a3e635" stop-opacity="0.82" />
+          <stop offset="100%" id="gelStop3" stop-color="#4d7c0f" stop-opacity="0.95" />
+        </linearGradient>
+        <!-- Specular rim highlight along plastic tube -->
+        <linearGradient id="plasticHighlight" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="rgba(255,255,255,0.9)" />
+          <stop offset="100%" stop-color="rgba(255,255,255,0.15)" />
+        </linearGradient>
+      </defs>
+
+      <!-- Angled Nozzle Group rotated at ~42 deg so tip is right at (18, 18) -->
+      <g transform="translate(18, 18) rotate(42)">
+        <!-- Tip opening shadow / wet bead -->
+        <ellipse id="nozzle-tip-bead" cx="2" cy="0" rx="5.5" ry="9.5" fill="#84cc16" opacity="0.85" />
+
+        <!-- Inner colored resin core inside the translucent tube -->
+        <path id="nozzle-gel-core"
+          d="M 18 -8.5 L 255 -15.5 L 255 15.5 L 18 8.5 C 14 5, 14 -5, 18 -8.5 Z"
+          fill="url(#innerGel)" />
+
+        <!-- Meniscus curve of liquid gel inside nozzle -->
+        <ellipse id="nozzle-meniscus" cx="18" cy="0" rx="3.5" ry="8.5" fill="#bef264" opacity="0.7" />
+
+        <!-- Outer translucent frosted plastic nozzle cone -->
+        <path
+          d="M 2 -11.5 L 260 -20 L 260 20 L 2 11.5 C -1 8, -1 -8, 2 -11.5 Z"
+          fill="url(#plasticBody)"
+          stroke="rgba(255,255,255,0.65)"
+          stroke-width="1.2" />
+
+        <!-- Crisp top plastic specular reflection streak -->
+        <path
+          d="M 5 -8.2 L 255 -15.5 L 255 -11.5 L 5 -5.2 Z"
+          fill="url(#plasticHighlight)"
+          opacity="0.85" />
+
+        <!-- Subtle bottom refraction edge -->
+        <path
+          d="M 6 8.5 L 255 15.8"
+          stroke="rgba(255,255,255,0.5)"
+          stroke-width="1.5"
+          stroke-linecap="round" />
+
+        <!-- Nozzle tip rim ellipse -->
+        <ellipse cx="1.8" cy="0" rx="3.2" ry="11.2"
+          fill="rgba(255,255,255,0.22)"
+          stroke="rgba(255,255,255,0.8)"
+          stroke-width="1.2" />
+      </g>
+    </svg>
+  </div>
+
+  <!-- Top Header / Studio Status & Action Bar -->
+  <header class="fixed top-3 left-3 right-3 sm:top-4 sm:left-5 sm:right-5 z-20 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
+    <!-- Brand Badge -->
+    <div class="craft-panel pointer-events-auto flex items-center gap-2.5 px-3.5 py-2 rounded-2xl">
+      <div id="brand-dot" class="w-4 h-4 rounded-full shadow-inner transition-colors duration-200"
+           style="background: radial-gradient(circle at 35% 30%, #ffffff 0%, #20b2aa 35%, #006666 100%);"></div>
+      <div>
+        <h1 class="text-xs sm:text-sm font-bold tracking-tight text-slate-800 leading-none">Nuvo Resin Studio</h1>
+        <p class="text-[10px] text-slate-500 font-medium mt-0.5 hidden sm:block">Click for pearl · Hold to swell · Drag to bead</p>
+      </div>
+    </div>
+
+    <!-- Right Action Controls -->
+    <div class="craft-panel pointer-events-auto flex items-center gap-1 sm:gap-1.5 p-1.5 rounded-2xl">
+      <!-- 3D Light / Tilt Toggle -->
+      <button id="btn-tilt" title="Toggle 3D Light Parallax Tilt"
+        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-800 text-white shadow-sm transition active:scale-95">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+        </svg>
+        <span class="hidden md:inline">3D Light</span>
+      </button>
+
+      <!-- ASMR Sound Toggle -->
+      <button id="btn-sound" title="Toggle ASMR Squeeze & Pop Audio"
+        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition active:scale-95">
+        <svg id="icon-sound-on" class="w-3.5 h-3.5 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+        </svg>
+        <svg id="icon-sound-off" class="w-3.5 h-3.5 text-slate-400 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
+        </svg>
+        <span class="hidden md:inline">ASMR</span>
+      </button>
+
+      <div class="w-px h-5 bg-slate-200 mx-0.5"></div>
+
+      <!-- Undo Button -->
+      <button id="btn-undo" title="Undo Last Drop (Ctrl+Z)"
+        class="p-2 rounded-xl text-slate-700 hover:bg-slate-100 active:scale-95 transition disabled:opacity-40">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>
+        </svg>
+      </button>
+
+      <!-- Clear Canvas Button -->
+      <button id="btn-clear" title="Clear Paper"
+        class="p-2 rounded-xl text-rose-600 hover:bg-rose-50 active:scale-95 transition">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+        </svg>
+      </button>
+
+      <!-- Export PNG Snapshot -->
+      <button id="btn-export" title="Save High-Res PNG Snapshot"
+        class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-teal-600 hover:bg-teal-700 text-white shadow-sm transition active:scale-95">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        <span>Save</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="fixed top-16 left-1/2 -translate-x-1/2 z-40 pointer-events-none opacity-0 -translate-y-2">
+    <div class="bg-slate-900/90 text-white text-xs font-medium px-4 py-2 rounded-full shadow-lg backdrop-blur-md">
+      <span id="toast-msg">Snapshot saved!</span>
+    </div>
+  </div>
+
+  <!-- Bottom Floating Tactile Craft Toolbar -->
+  <footer class="fixed bottom-3 left-3 right-3 sm:bottom-5 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-20 pointer-events-none flex justify-center">
+    <div class="craft-panel pointer-events-auto w-full sm:w-auto max-w-4xl rounded-3xl p-2.5 sm:px-4 sm:py-3 flex flex-col gap-2.5">
+
+      <!-- Row 1: Resin Color Swatches -->
+      <div class="flex items-center justify-between sm:justify-center gap-2 overflow-x-auto no-scrollbar py-1 px-1">
+        <div id="swatch-container" class="flex items-center gap-2 sm:gap-2.5">
+          <!-- Swatches injected via JS -->
+        </div>
+
+        <!-- Custom Color Picker Swatch -->
+        <label title="Custom Resin Tint" class="relative w-7 h-7 sm:w-8 sm:h-8 rounded-full cursor-pointer flex items-center justify-center border-2 border-white shadow-md overflow-hidden swatch-btn shrink-0"
+               style="background: conic-gradient(from 0deg, #ff595e, #ffca3a, #8ac926, #1982c4, #6a4c93, #ff595e);">
+          <input type="color" id="custom-color-input" value="#ff4d8d" class="opacity-0 absolute inset-0 w-full h-full cursor-pointer" />
+          <span class="w-2.5 h-2.5 rounded-full bg-white/90 shadow-sm pointer-events-none"></span>
+        </label>
+      </div>
+
+      <!-- Row 2: Formula, Dispense Mode, Paper Stock -->
+      <div class="flex flex-wrap items-center justify-between sm:justify-center gap-2 pt-1.5 border-t border-slate-200/70 text-xs">
+
+        <!-- Formula / Finish Toggle -->
+        <div class="flex items-center bg-slate-200/70 p-0.5 rounded-xl" role="group" aria-label="Resin Formula">
+          <button data-formula="jelly" class="formula-btn px-2.5 py-1 rounded-lg font-semibold bg-white text-slate-800 shadow-sm transition">
+            Jelly
+          </button>
+          <button data-formula="shimmer" class="formula-btn px-2.5 py-1 rounded-lg font-medium text-slate-600 hover:text-slate-900 transition">
+            Shimmer
+          </button>
+          <button data-formula="enamel" class="formula-btn px-2.5 py-1 rounded-lg font-medium text-slate-600 hover:text-slate-900 transition">
+            Enamel
+          </button>
+        </div>
+
+        <!-- Size / Dispense Mode -->
+        <div class="flex items-center bg-slate-200/70 p-0.5 rounded-xl" role="group" aria-label="Dispense Mode">
+          <button data-mode="swell" class="mode-btn px-2.5 py-1 rounded-lg font-semibold bg-white text-slate-800 shadow-sm transition">
+            Hold Swell
+          </button>
+          <button data-mode="pearl" class="mode-btn px-2.5 py-1 rounded-lg font-medium text-slate-600 hover:text-slate-900 transition">
+            Uniform Pearl
+          </button>
+        </div>
+
+        <!-- Paper Texture Selector -->
+        <div class="flex items-center gap-1.5 bg-slate-200/70 px-2 py-1 rounded-xl">
+          <span class="text-[11px] font-medium text-slate-500 hidden sm:inline">Paper:</span>
+          <select id="paper-select" class="bg-transparent font-semibold text-slate-800 text-xs focus:outline-none cursor-pointer pr-1">
+            <option value="watercolor">Cold-Press Watercolor</option>
+            <option value="bristol">Smooth Bristol</option>
+            <option value="kraft">Warm Kraft Card</option>
+            <option value="dark">Midnight Matte</option>
+          </select>
+        </div>
+
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    /**
+     * 3D Liquid Resin & Gel Dot Studio
+     * Custom Three.js GLSL Shaders + Surface Tension Spring Physics + Web Audio ASMR
+     */
+
+    // =========================================================================
+    // 1. COLOR PALETTE & STUDIO CONFIGURATION
+    // =========================================================================
+    const RESIN_SWATCHES = [
+      { name: 'Emerald Teal',       hex: '#0d9488', rim: '#064e3b', highlight: '#99f6e4' },
+      { name: 'Electric Cyan',      hex: '#0284c7', rim: '#0c4a6e', highlight: '#bae6fd' },
+      { name: 'Midnight Navy',      hex: '#1e1b6b', rim: '#09072e', highlight: '#a5b4fc' },
+      { name: 'Amethyst Purple',    hex: '#8b46b5', rim: '#4c1d95', highlight: '#f3e8ff' },
+      { name: 'Neon Lime',          hex: '#84cc16', rim: '#3f6212', highlight: '#ecfccb' },
+      { name: 'Ruby Rose',          hex: '#e11d48', rim: '#881337', highlight: '#fecdd3' },
+      { name: 'Amber Honey',        hex: '#d97706', rim: '#78350f', highlight: '#fef3c7' },
+      { name: 'Pearl Ivory',        hex: '#f8fafc', rim: '#94a3b8', highlight: '#ffffff' }
+    ];
+
+    const PAPER_STOCKS = {
+      watercolor: { bg: '#eeece6', grain: 0.055, fiber: 0.045, dark: false },
+      bristol:    { bg: '#f8f8f6', grain: 0.015, fiber: 0.010, dark: false },
+      kraft:      { bg: '#c8ab87', grain: 0.065, fiber: 0.060, dark: false },
+      dark:       { bg: '#1e2128', grain: 0.045, fiber: 0.035, dark: true  }
+    };
+
+    const state = {
+      selectedColor: RESIN_SWATCHES[0],
+      formula: 'jelly',        // 'jelly' | 'shimmer' | 'enamel'
+      dispenseMode: 'swell',   // 'swell' | 'pearl'
+      paperType: 'watercolor',
+      soundEnabled: true,
+      tiltEnabled: true,
+      isPressing: false,
+      activeDrop: null,
+      drops: [],               // Array of drop objects
+      strokes: [],             // Array of drop batches for clean Undo
+      currentStroke: [],
+      mouseNDC: new THREE.Vector2(0, 0),
+      smoothLightOffset: new THREE.Vector2(0, 0),
+      lastDragPos: null
+    };
+
+    // =========================================================================
+    // 2. PROCEDURAL ASMR WEB AUDIO ENGINE (Squeeze, Wet Squish & Pop)
+    // =========================================================================
+    class AsmrAudioEngine {
+      constructor() {
+        this.ctx = null;
+        this.squeezeNode = null;
+        this.squeezeGain = null;
+      }
+
+      init() {
+        if (!this.ctx) {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          if (AudioCtx) this.ctx = new AudioCtx();
+        }
+        if (this.ctx && this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      }
+
+      startSqueeze() {
+        if (!state.soundEnabled) return;
+        this.init();
+        if (!this.ctx) return;
+
+        const now = this.ctx.currentTime;
+
+        // Soft viscous gel flow noise (bandpass filtered pink/white noise)
+        const bufferSize = this.ctx.sampleRate * 1.5;
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        let b0 = 0, b1 = 0, b2 = 0;
+        for (let i = 0; i < bufferSize; i++) {
+          const white = Math.random() * 2 - 1;
+          b0 = 0.997 * b0 + white * 0.029;
+          b1 = 0.985 * b1 + white * 0.032;
+          b2 = 0.950 * b2 + white * 0.048;
+          data[i] = (b0 + b1 + b2) * 0.6;
+        }
+
+        const noise = this.ctx.createBufferSource();
+        noise.buffer = buffer;
+        noise.loop = true;
+
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(340, now);
+        filter.frequency.exponentialRampToValueAtTime(620, now + 0.8);
+        filter.Q.value = 3.2;
+
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(0.001, now);
+        gain.gain.linearRampToValueAtTime(0.06, now + 0.06);
+
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+        noise.start(now);
+
+        this.squeezeNode = noise;
+        this.squeezeGain = gain;
+      }
+
+      stopSqueezeAndPop(radiusScale = 1.0) {
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+
+        if (this.squeezeGain && this.squeezeNode) {
+          this.squeezeGain.gain.cancelScheduledValues(now);
+          this.squeezeGain.gain.setValueAtTime(this.squeezeGain.gain.value, now);
+          this.squeezeGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.05);
+          const node = this.squeezeNode;
+          setTimeout(() => { try { node.stop(); } catch (e) {} }, 60);
+          this.squeezeNode = null;
+          this.squeezeGain = null;
+        }
+
+        if (!state.soundEnabled) return;
+
+        // Subtle wet surface-tension "pop" bubble transient
+        const osc = this.ctx.createOscillator();
+        const popGain = this.ctx.createGain();
+        const baseFreq = Math.max(240, 560 - radiusScale * 130);
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(baseFreq * 0.72, now);
+        osc.frequency.exponentialRampToValueAtTime(baseFreq * 1.48, now + 0.055);
+
+        popGain.gain.setValueAtTime(0.001, now);
+        popGain.gain.linearRampToValueAtTime(0.09, now + 0.008);
+        popGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.075);
+
+        osc.connect(popGain);
+        popGain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.08);
+      }
+    }
+
+    const audio = new AsmrAudioEngine();
+
+    // =========================================================================
+    // 3. THREE.JS SCENE, ORTHOGRAPHIC STUDIO CAMERA & PROCEDURAL PAPER SHADER
+    // =========================================================================
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+
+    let viewWidth = window.innerWidth;
+    let viewHeight = window.innerHeight;
+
+    // Orthographic camera mapped 1:1 to screen pixels (center at 0,0)
+    const camera = new THREE.OrthographicCamera(
+      -viewWidth / 2, viewWidth / 2,
+      viewHeight / 2, -viewHeight / 2,
+      -500, 500
+    );
+    camera.position.z = 200;
+
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: false,
+      preserveDrawingBuffer: true, // Needed for PNG snapshot export
+      powerPreference: 'high-performance'
+    });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(viewWidth, viewHeight);
+    container.appendChild(renderer.domElement);
+
+    // --- Procedural Cold-Press Watercolor / Cardstock Paper Background ---
+    const paperUniforms = {
+      uResolution: { value: new THREE.Vector2(viewWidth, viewHeight) },
+      uBaseColor:  { value: new THREE.Color(PAPER_STOCKS.watercolor.bg) },
+      uGrain:      { value: PAPER_STOCKS.watercolor.grain },
+      uFiber:      { value: PAPER_STOCKS.watercolor.fiber },
+      uLightDir:   { value: new THREE.Vector2(-0.65, 0.75) }
+    };
+
+    const paperMaterial = new THREE.ShaderMaterial({
+      uniforms: paperUniforms,
+      depthWrite: false,
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        precision highp float;
+        varying vec2 vUv;
+        uniform vec2 uResolution;
+        uniform vec3 uBaseColor;
+        uniform float uGrain;
+        uniform float uFiber;
+        uniform vec2 uLightDir;
+
+        float hash12(vec2 p) {
+          vec3 p3  = fract(vec3(p.xyx) * 0.1031);
+          p3 += dot(p3, p3.yzx + 33.33);
+          return fract((p3.x + p3.y) * p3.z);
+        }
+
+        float valueNoise(vec2 p) {
+          vec2 i = floor(p);
+          vec2 f = fract(p);
+          vec2 u = f * f * (3.0 - 2.0 * f);
+          return mix(
+            mix(hash12(i + vec2(0.0, 0.0)), hash12(i + vec2(1.0, 0.0)), u.x),
+            mix(hash12(i + vec2(0.0, 1.0)), hash12(i + vec2(1.0, 1.0)), u.x),
+            u.y
+          );
+        }
+
+        // Paper pulp height field for micro-bump studio lighting
+        float paperHeight(vec2 px) {
+          float n1 = valueNoise(px * 0.14);
+          float n2 = valueNoise(px * 0.42 + vec2(17.3, 9.1));
+          float n3 = valueNoise(px * 1.15);
+          // Subtle directional cellulose fibers
+          float fiber1 = valueNoise(vec2(px.x * 0.06 + px.y * 0.03, px.y * 0.35));
+          float fiber2 = valueNoise(vec2(px.x * 0.32, px.y * 0.05 - px.x * 0.04));
+          return n1 * 0.45 + n2 * 0.30 + n3 * 0.25 + (fiber1 * fiber2) * 0.45;
+        }
+
+        void main() {
+          vec2 px = vUv * uResolution;
+
+          // Compute micro-surface normal of cold-press paper bumps
+          float eps = 1.35;
+          float hC = paperHeight(px);
+          float hX = paperHeight(px + vec2(eps, 0.0));
+          float hY = paperHeight(px + vec2(0.0, eps));
+
+          vec3 normal = normalize(vec3((hC - hX) * uGrain * 18.0, (hC - hY) * uGrain * 18.0, 1.0));
+          vec3 lightVec = normalize(vec3(uLightDir.x, uLightDir.y, 1.25));
+          float diffuse = dot(normal, lightVec);
+
+          // Fine organic speckle / fiber inclusions
+          float speck = hash12(floor(px * 0.85));
+          float darkFiber = smoothstep(0.985, 1.0, speck) * uFiber;
+
+          // Subtle top-left warm studio falloff + gentle edge vignette
+          vec2 centered = (vUv - 0.5) * 2.0;
+          float studioGrad = 1.0 + dot(centered, uLightDir) * 0.035 - dot(centered, centered) * 0.025;
+
+          vec3 col = uBaseColor * studioGrad;
+          col += (diffuse - 0.78) * uGrain * 1.35;
+          col -= darkFiber * 0.35;
+
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `
+    });
+
+    const paperPlane = new THREE.Mesh(new THREE.PlaneGeometry(viewWidth, viewHeight), paperMaterial);
+    paperPlane.position.z = -100;
+    scene.add(paperPlane);
+
+    // =========================================================================
+    // 4. CUSTOM 3D TRANSLUCENT RESIN / GEL DOME SHADER
+    // =========================================================================
+    /**
+     * Renders each drop as a high-precision ray-evaluated hemispherical/elliptical
+     * dielectric resin dome on a quad with:
+     * 1. Tinted Caustic Shadow (light refracting through colored resin onto paper)
+     * 2. Contact Ambient Occlusion ring where resin meets paper
+     * 3. Beer-Lambert Depth Absorption & Subsurface Scattering (richer rim, glowing center)
+     * 4. Suspended Mica / Glitter / Dark Organic Flecks (like the purple drop in ref)
+     * 5. Dual Overhead Studio Softbox / Ring-light Crisp Specular Reflections + Rim Fresnel
+     */
+    const DROP_VERTEX_SHADER = `
+      varying vec2 vLocalPos; // -1.0 to +1.0 across quad
+      void main() {
+        vLocalPos = position.xy;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `;
+
+    const DROP_FRAGMENT_SHADER = `
+      precision highp float;
+      varying vec2 vLocalPos;
+
+      uniform vec3 uColor;
+      uniform vec3 uRimColor;
+      uniform vec3 uHighlightTint;
+      uniform vec3 uPaperColor;
+      uniform float uRadius;
+      uniform float uHeightRatio;   // Dome height / radius (deforms with spring wobble)
+      uniform vec2 uWobbleTilt;     // Jelly surface tension lateral wobble
+      uniform vec2 uLightOffset;    // Interactive studio light parallax
+      uniform int uFormula;         // 0 = Jelly, 1 = Shimmer/Speckled, 2 = Opaque Enamel
+      uniform float uSeed;
+      uniform float uPaperDark;
+
+      float hash21(vec2 p) {
+        p = fract(p * vec2(123.34, 456.21));
+        p += dot(p, p + 45.32);
+        return fract(p.x * p.y);
+      }
+
+      float noise2D(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(
+          mix(hash21(i + vec2(0.0, 0.0)), hash21(i + vec2(1.0, 0.0)), u.x),
+          mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), u.x),
+          u.y
+        );
+      }
+
+      void main() {
+        // Quad extends to 1.65x the drop radius to leave ample room for caustic drop shadow
+        vec2 p = vLocalPos * 1.65;
+
+        // Primary studio light direction (top-left, subtly interactive with mouse tilt)
+        vec3 lightDir1 = normalize(vec3(-0.48 + uLightOffset.x * 0.35, 0.62 + uLightOffset.y * 0.35, 0.95));
+        // Secondary overhead ring-light / fill softbox
+        vec3 lightDir2 = normalize(vec3(0.18 + uLightOffset.x * 0.25, 0.52 + uLightOffset.y * 0.25, 1.15));
+
+        // --- 1. COLORED CAUSTIC & AMBIENT DROP SHADOW ON PAPER ---
+        vec2 shadowOffset = vec2(0.16 - uLightOffset.x * 0.08, -0.19 - uLightOffset.y * 0.08) * uHeightRatio;
+        vec2 sp = p - shadowOffset;
+        float sDist = length(sp);
+
+        // Soft outer shadow falloff
+        float outerShadow = 1.0 - smoothstep(0.72, 1.38, sDist);
+        // Tight contact occlusion right beneath the bead edge
+        float contactAO = 1.0 - smoothstep(0.88, 1.09, length(p));
+
+        // Caustic focal glow inside the shadow (light focused by the curved dome lens!)
+        float causticCore = smoothstep(0.88, 0.15, sDist) * smoothstep(0.0, 0.65, sDist);
+
+        // Base shadow color on paper
+        vec3 darkShadow = uPaperColor * mix(0.62, 0.35, uPaperDark);
+        // Translucent colored caustic light projected onto paper
+        float translucency = (uFormula == 2) ? 0.12 : 0.68;
+        vec3 causticTint = mix(darkShadow, uColor * 1.18 + uHighlightTint * 0.15, translucency);
+        vec3 shadowRGB = mix(darkShadow, causticTint, causticCore * 0.85);
+        shadowRGB = mix(shadowRGB, uPaperColor * 0.42, contactAO * 0.45);
+
+        float shadowAlpha = clamp(outerShadow * 0.52 + contactAO * 0.38, 0.0, 0.88);
+
+        // --- 2. 3D RESIN DOME GEOMETRY & SURFACE NORMAL ---
+        // Slight organic hand-piped irregularity so drops look genuinely artisanal
+        float angle = atan(p.y, p.x);
+        float organicEdge = 1.0
+          + 0.014 * sin(angle * 2.0 + uSeed * 6.28)
+          + 0.009 * cos(angle * 3.0 - uSeed * 4.1);
+
+        vec2 dp = p / organicEdge;
+        float r2 = dot(dp, dp);
+
+        // Anti-aliased dome silhouette edge
+        float aaWidth = 2.2 / max(uRadius, 12.0);
+        float domeMask = 1.0 - smoothstep(1.0 - aaWidth, 1.0 + aaWidth * 0.5, r2);
+
+        if (domeMask <= 0.001 && shadowAlpha <= 0.001) {
+          discard;
+        }
+
+        // Compute smooth spherical-cap dome height z and analytical surface normal
+        float clampedR2 = min(r2, 0.998);
+        // Self-leveling resin profile: rounded meniscus edge with plump glossy crown
+        float z = sqrt(max(0.0, 1.0 - clampedR2));
+        float domeZ = pow(z, 0.78) * uHeightRatio;
+
+        // Analytical surface normal tilted by jelly spring wobble
+        vec2 gradXY = dp * (0.78 * pow(max(z, 0.08), -0.22)) * uHeightRatio;
+        vec3 N = normalize(vec3(gradXY.x + uWobbleTilt.x, gradXY.y + uWobbleTilt.y, 1.0));
+        vec3 V = vec3(0.0, 0.0, 1.0);
+
+        // --- 3. SUBSURFACE SCATTERING, DEPTH ABSORPTION & INTERNAL GLOW ---
+        // Optical path thickness: thicker rim absorbs more light -> deeper saturated rim;
+        // translucent center transmits warm paper bounce + internal scattering!
+        float rimThickness = smoothstep(0.15, 1.0, r2);
+        vec3 deepRim = mix(uColor * 0.48, uRimColor, 0.72);
+        vec3 bodyPigment = mix(uColor * 1.12, deepRim, pow(rimThickness, 1.35));
+
+        // Subsurface forward-scatter glow on the side opposite the main top-left light
+        // (Light enters top-left of translucent resin dome and illuminates bottom-right internal rim!)
+        float sssGlow = clamp(dot(-N.xy, normalize(lightDir1.xy)), 0.0, 1.0);
+        sssGlow = pow(sssGlow, 1.8) * smoothstep(0.25, 0.95, sqrt(clampedR2));
+        float sssStrength = (uFormula == 2) ? 0.14 : 0.55;
+        bodyPigment += mix(uColor, uHighlightTint, 0.45) * sssGlow * sssStrength;
+
+        // Subtle paper texture & caustic brightening visible through translucent jelly
+        if (uFormula != 2) {
+          float centerTransmission = (1.0 - rimThickness * 0.75) * 0.28;
+          vec3 transmittedPaper = uPaperColor * (0.95 + 0.25 * sssGlow);
+          bodyPigment = mix(bodyPigment, transmittedPaper * mix(vec3(1.0), uColor * 1.35, 0.65), centerTransmission);
+        }
+
+        // --- 4. SHIMMER MICA & ORGANIC FLECKS (Formula == 1, like purple drop in ref) ---
+        if (uFormula == 1) {
+          vec2 speckUV = dp * (uRadius * 0.28) + vec2(uSeed * 31.7, uSeed * 19.3);
+          vec2 cell = floor(speckUV);
+          vec2 local = fract(speckUV) - 0.5;
+          float rnd = hash21(cell);
+
+          // Fine sparkling mica micro-flakes
+          if (rnd > 0.78) {
+            vec2 jitter = (vec2(hash21(cell + 1.3), hash21(cell + 7.9)) - 0.5) * 0.55;
+            float d = length(local - jitter);
+            float sparkle = smoothstep(0.18, 0.02, d);
+            float glint = 0.55 + 0.45 * sin(uSeed * 20.0 + rnd * 40.0 + N.x * 4.0);
+            bodyPigment += uHighlightTint * sparkle * glint * 0.65;
+          }
+          // Tiny dark pigment inclusions (matching the organic specks in the reference photo)
+          if (rnd < 0.065) {
+            vec2 jitter = (vec2(hash21(cell + 4.1), hash21(cell + 2.7)) - 0.5) * 0.5;
+            float d = length(local - jitter);
+            float fleck = smoothstep(0.22, 0.05, d);
+            bodyPigment = mix(bodyPigment, uRimColor * 0.25, fleck * 0.72);
+          }
+        }
+
+        // --- 5. DIFFUSE, FRESNEL RIM & SOFT GLOSSY GRADIENT SHEEN ---
+        float NdotL1 = max(dot(N, lightDir1), 0.0);
+        float NdotL2 = max(dot(N, lightDir2), 0.0);
+
+        // Soft glossy directional shading
+        vec3 litColor = bodyPigment * (0.76 + 0.34 * NdotL1 + 0.12 * NdotL2);
+
+        // Wet resin Fresnel edge reflection
+        float fresnel = pow(1.0 - max(dot(N, V), 0.0), 3.0);
+        litColor = mix(litColor, mix(uHighlightTint, vec3(1.0), 0.45), fresnel * 0.42);
+
+        // Smooth, broad diffused studio sheen (no hard white circle spots)
+        vec3 H1 = normalize(lightDir1 + V);
+        float specAngle1 = max(dot(N, H1), 0.0);
+        float softSheen1 = pow(specAngle1, 14.0) * 0.24 + pow(specAngle1, 42.0) * 0.12;
+
+        vec3 H2 = normalize(lightDir2 + V);
+        float specAngle2 = max(dot(N, H2), 0.0);
+        float softSheen2 = pow(specAngle2, 18.0) * 0.10;
+
+        vec3 sheenTint = mix(uHighlightTint, vec3(1.0), 0.45);
+        vec3 specularTotal = sheenTint * (softSheen1 + softSheen2);
+
+        vec3 finalDomeRGB = litColor + specularTotal;
+
+        // Inner edge anti-aliased meniscus rim darkening
+        float rimEdge = smoothstep(0.86, 1.0, sqrt(clampedR2));
+        finalDomeRGB = mix(finalDomeRGB, deepRim * 0.85, rimEdge * 0.38);
+
+        // Composite glossy dome cleanly over its own colored caustic shadow
+        vec3 outRGB = mix(shadowRGB, finalDomeRGB, domeMask);
+        float outAlpha = max(shadowAlpha, domeMask);
+
+        gl_FragColor = vec4(outRGB, outAlpha);
+      }
+    `;
+
+    // =========================================================================
+    // 5. DROP ENTITY MANAGEMENT & SPRING SURFACE-TENSION PHYSICS
+    // =========================================================================
+    const sharedQuadGeometry = new THREE.PlaneGeometry(2, 2);
+
+    function createDrop(x, y, initialRadius = 11) {
+      const swatch = state.selectedColor;
+      const formulaIdx = state.formula === 'jelly' ? 0 : (state.formula === 'shimmer' ? 1 : 2);
+      const paperCfg = PAPER_STOCKS[state.paperType];
+
+      const uniforms = {
+        uColor:         { value: new THREE.Color(swatch.hex) },
+        uRimColor:      { value: new THREE.Color(swatch.rim) },
+        uHighlightTint: { value: new THREE.Color(swatch.highlight) },
+        uPaperColor:    { value: new THREE.Color(paperCfg.bg) },
+        uRadius:        { value: initialRadius },
+        uHeightRatio:   { value: 0.78 },
+        uWobbleTilt:    { value: new THREE.Vector2(0, 0) },
+        uLightOffset:   { value: state.smoothLightOffset },
+        uFormula:       { value: formulaIdx },
+        uSeed:          { value: Math.random() },
+        uPaperDark:     { value: paperCfg.dark ? 1.0 : 0.0 }
+      };
+
+      const material = new THREE.ShaderMaterial({
+        uniforms,
+        vertexShader: DROP_VERTEX_SHADER,
+        fragmentShader: DROP_FRAGMENT_SHADER,
+        transparent: true,
+        depthWrite: false
+      });
+
+      const mesh = new THREE.Mesh(sharedQuadGeometry, material);
+      mesh.position.set(x, y, state.drops.length * 0.05);
+      // Quad is 1.65x radius so shadow never clips
+      const quadRadius = initialRadius * 1.65;
+      mesh.scale.set(quadRadius, quadRadius, 1);
+      scene.add(mesh);
+
+      const drop = {
+        mesh,
+        uniforms,
+        x,
+        y,
+        radius: initialRadius,
+        targetRadius: initialRadius,
+        // Spring physics for jelly surface-tension wobble on release
+        springVel: 0,
+        springDisp: 0.14, // Initial slight squish impulse
+        wobbleAngle: Math.random() * Math.PI * 2,
+        isGrowing: true
+      };
+
+      state.drops.push(drop);
+      state.currentStroke.push(drop);
+      return drop;
+    }
+
+    function updateDropScale(drop) {
+      const effectiveRadius = Math.max(4, drop.radius * (1.0 + drop.springDisp));
+      const quadRadius = effectiveRadius * 1.65;
+      drop.mesh.scale.set(quadRadius, quadRadius, 1);
+      drop.uniforms.uRadius.value = effectiveRadius;
+      // Volume conservation: as radius squishes outward, height ratio flattens slightly
+      drop.uniforms.uHeightRatio.value = 0.84 / (1.0 + drop.springDisp * 1.35);
+      drop.uniforms.uWobbleTilt.value.set(
+        Math.cos(drop.wobbleAngle) * drop.springDisp * 0.85,
+        Math.sin(drop.wobbleAngle) * drop.springDisp * 0.85
+      );
+    }
+
+    // Subtle surface-tension neighbor interaction when placing close to existing drops
+    function nudgeNearbyDrops(newDrop) {
+      for (let i = 0; i < state.drops.length - 1; i++) {
+        const other = state.drops[i];
+        const dx = other.x - newDrop.x;
+        const dy = other.y - newDrop.y;
+        const dist = Math.hypot(dx, dy);
+        const minTouch = (other.radius + newDrop.radius) * 0.92;
+        if (dist > 0.1 && dist < minTouch) {
+          // Gentle surface tension ripple & slight repulsion so domes sit snugly together
+          const push = (minTouch - dist) * 0.18;
+          other.x += (dx / dist) * push;
+          other.y += (dy / dist) * push;
+          other.mesh.position.x = other.x;
+          other.mesh.position.y = other.y;
+          other.springDisp += 0.045;
+          other.wobbleAngle = Math.atan2(dy, dx);
+        }
+      }
+    }
+
+    // =========================================================================
+    // 6. INTERACTIVE APPLICATOR NOZZLE & POINTER INPUT HANDLING
+    // =========================================================================
+    const nozzleOverlay = document.getElementById('nozzle-overlay');
+    const nozzleStop1 = document.getElementById('gelStop1');
+    const nozzleStop2 = document.getElementById('gelStop2');
+    const nozzleStop3 = document.getElementById('gelStop3');
+    const nozzleTipBead = document.getElementById('nozzle-tip-bead');
+    const nozzleMeniscus = document.getElementById('nozzle-meniscus');
+    const brandDot = document.getElementById('brand-dot');
+
+    let pointerX = viewWidth / 2;
+    let pointerY = viewHeight / 2;
+    let smoothNozzleX = pointerX;
+    let smoothNozzleY = pointerY;
+    let nozzlePressAmount = 0; // 0 = hovering, 1 = pressed down dispensing
+
+    function syncNozzleColor() {
+      const c = state.selectedColor;
+      nozzleStop1.setAttribute('stop-color', c.hex);
+      nozzleStop2.setAttribute('stop-color', c.highlight);
+      nozzleStop3.setAttribute('stop-color', c.rim);
+      nozzleTipBead.setAttribute('fill', c.hex);
+      nozzleMeniscus.setAttribute('fill', c.highlight);
+      brandDot.style.background = `radial-gradient(circle at 35% 30%, #ffffff 0%, ${c.hex} 40%, ${c.rim} 100%)`;
+    }
+
+    function screenToWorld(clientX, clientY) {
+      return {
+        x: clientX - viewWidth / 2,
+        y: viewHeight / 2 - clientY
+      };
+    }
+
+    function handlePointerDown(e) {
+      if (e.button !== undefined && e.button !== 0) return;
+      pointerX = e.clientX;
+      pointerY = e.clientY;
+      smoothNozzleX = pointerX;
+      smoothNozzleY = pointerY;
+
+      state.isPressing = true;
+      state.currentStroke = [];
+      nozzlePressAmount = 1;
+
+      const world = screenToWorld(pointerX, pointerY);
+      const startR = state.dispenseMode === 'pearl' ? 22 : 12;
+      const drop = createDrop(world.x, world.y, startR);
+      if (state.dispenseMode === 'pearl') {
+        drop.targetRadius = 24;
+      }
+      state.activeDrop = drop;
+      state.lastDragPos = { x: world.x, y: world.y };
+      nudgeNearbyDrops(drop);
+
+      audio.startSqueeze();
+    }
+
+    function handlePointerMove(e) {
+      pointerX = e.clientX;
+      pointerY = e.clientY;
+
+      // Normalized mouse coordinates for 3D light parallax
+      state.mouseNDC.x = (pointerX / viewWidth) * 2 - 1;
+      state.mouseNDC.y = -((pointerY / viewHeight) * 2 - 1);
+
+      if (!state.isPressing) return;
+
+      const world = screenToWorld(pointerX, pointerY);
+      if (!state.lastDragPos) {
+        state.lastDragPos = world;
+        return;
+      }
+
+      const dist = Math.hypot(world.x - state.lastDragPos.x, world.y - state.lastDragPos.y);
+      // If user drags while holding down, dispense a continuous string of glossy pearls/beads
+      const stepSpacing = state.dispenseMode === 'pearl' ? 28 : 24;
+      if (dist >= stepSpacing) {
+        if (state.activeDrop) {
+          state.activeDrop.isGrowing = false;
+          state.activeDrop.springDisp = 0.09;
+        }
+        const beadR = state.dispenseMode === 'pearl' ? 21 : 17;
+        const nextDrop = createDrop(world.x, world.y, beadR);
+        nextDrop.isGrowing = (state.dispenseMode === 'swell');
+        nudgeNearbyDrops(nextDrop);
+        state.activeDrop = nextDrop;
+        state.lastDragPos = { x: world.x, y: world.y };
+      }
+    }
+
+    function handlePointerUp() {
+      if (!state.isPressing) return;
+      state.isPressing = false;
+      nozzlePressAmount = 0;
+
+      if (state.activeDrop) {
+        state.activeDrop.isGrowing = false;
+        // Give the drop a satisfying jelly surface-tension wobble upon nozzle pull-away
+        state.activeDrop.springDisp = 0.13;
+        state.activeDrop.wobbleAngle = -Math.PI * 0.25;
+        audio.stopSqueezeAndPop(state.activeDrop.radius / 26);
+        state.activeDrop = null;
+      } else {
+        audio.stopSqueezeAndPop(1.0);
+      }
+
+      if (state.currentStroke.length > 0) {
+        state.strokes.push([...state.currentStroke]);
+        state.currentStroke = [];
+      }
+    }
+
+    const canvasEl = renderer.domElement;
+    canvasEl.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+
+    // =========================================================================
+    // 7. UI CONTROLS, SWATCHES, UNDO, CLEAR & PNG EXPORT
+    // =========================================================================
+    const swatchContainer = document.getElementById('swatch-container');
+
+    function renderSwatches() {
+      swatchContainer.innerHTML = '';
+      RESIN_SWATCHES.forEach((swatch, index) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.title = swatch.name;
+        btn.ariaLabel = swatch.name;
+        btn.className = `swatch-btn w-7 h-7 sm:w-8 sm:h-8 rounded-full border-2 border-white shadow-md shrink-0 relative ${
+          state.selectedColor.hex === swatch.hex ? 'active' : ''
+        }`;
+        // Glossy 3D resin look right on the UI swatch button
+        btn.style.background = `radial-gradient(circle at 32% 28%, #ffffff 0%, ${swatch.highlight} 14%, ${swatch.hex} 52%, ${swatch.rim} 100%)`;
+
+        btn.addEventListener('click', () => {
+          state.selectedColor = swatch;
+          syncNozzleColor();
+          renderSwatches();
+        });
+        swatchContainer.appendChild(btn);
+      });
+    }
+
+    // Custom Color Picker Input
+    const customColorInput = document.getElementById('custom-color-input');
+    customColorInput.addEventListener('input', (e) => {
+      const hex = e.target.value;
+      const base = new THREE.Color(hex);
+      const rim = base.clone().multiplyScalar(0.45);
+      const highlight = base.clone().lerp(new THREE.Color('#ffffff'), 0.72);
+      state.selectedColor = {
+        name: 'Custom Tint',
+        hex: '#' + base.getHexString(),
+        rim: '#' + rim.getHexString(),
+        highlight: '#' + highlight.getHexString()
+      };
+      syncNozzleColor();
+      document.querySelectorAll('.swatch-btn').forEach(el => el.classList.remove('active'));
+    });
+
+    // Formula Toggle Buttons (Jelly / Shimmer / Enamel)
+    document.querySelectorAll('.formula-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.formula = btn.dataset.formula;
+        document.querySelectorAll('.formula-btn').forEach(b => {
+          b.className = 'formula-btn px-2.5 py-1 rounded-lg font-medium text-slate-600 hover:text-slate-900 transition';
+        });
+        btn.className = 'formula-btn px-2.5 py-1 rounded-lg font-semibold bg-white text-slate-800 shadow-sm transition';
+      });
+    });
+
+    // Dispense Mode Buttons (Hold Swell / Uniform Pearl)
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.dispenseMode = btn.dataset.mode;
+        document.querySelectorAll('.mode-btn').forEach(b => {
+          b.className = 'mode-btn px-2.5 py-1 rounded-lg font-medium text-slate-600 hover:text-slate-900 transition';
+        });
+        btn.className = 'mode-btn px-2.5 py-1 rounded-lg font-semibold bg-white text-slate-800 shadow-sm transition';
+      });
+    });
+
+    // Paper Stock Selector
+    const paperSelect = document.getElementById('paper-select');
+    paperSelect.addEventListener('change', (e) => {
+      state.paperType = e.target.value;
+      const cfg = PAPER_STOCKS[state.paperType];
+      paperUniforms.uBaseColor.value.set(cfg.bg);
+      paperUniforms.uGrain.value = cfg.grain;
+      paperUniforms.uFiber.value = cfg.fiber;
+
+      // Update existing drops so their caustic shadow and subsurface paper transmission match new cardstock
+      state.drops.forEach(drop => {
+        drop.uniforms.uPaperColor.value.set(cfg.bg);
+        drop.uniforms.uPaperDark.value = cfg.dark ? 1.0 : 0.0;
+      });
+    });
+
+    // 3D Light Tilt Toggle
+    const btnTilt = document.getElementById('btn-tilt');
+    btnTilt.addEventListener('click', () => {
+      state.tiltEnabled = !state.tiltEnabled;
+      if (state.tiltEnabled) {
+        btnTilt.className = 'flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-800 text-white shadow-sm transition active:scale-95';
+        showToast('3D Light Parallax ON');
+      } else {
+        btnTilt.className = 'flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-100 text-slate-600 transition active:scale-95';
+        showToast('3D Light Parallax Locked');
+      }
+    });
+
+    // ASMR Sound Toggle
+    const btnSound = document.getElementById('btn-sound');
+    const iconSoundOn = document.getElementById('icon-sound-on');
+    const iconSoundOff = document.getElementById('icon-sound-off');
+    btnSound.addEventListener('click', () => {
+      state.soundEnabled = !state.soundEnabled;
+      iconSoundOn.classList.toggle('hidden', !state.soundEnabled);
+      iconSoundOff.classList.toggle('hidden', state.soundEnabled);
+      showToast(state.soundEnabled ? 'ASMR Audio Enabled' : 'Audio Muted');
+    });
+
+    // Undo Action
+    function undoLastStroke() {
+      if (state.strokes.length === 0) return;
+      const lastBatch = state.strokes.pop();
+      lastBatch.forEach(drop => {
+        scene.remove(drop.mesh);
+        drop.mesh.material.dispose();
+        const idx = state.drops.indexOf(drop);
+        if (idx !== -1) state.drops.splice(idx, 1);
+      });
+    }
+
+    document.getElementById('btn-undo').addEventListener('click', undoLastStroke);
+    window.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        undoLastStroke();
+      }
+    });
+
+    // Clear Canvas
+    document.getElementById('btn-clear').addEventListener('click', () => {
+      if (state.drops.length === 0) return;
+      state.drops.forEach(drop => {
+        scene.remove(drop.mesh);
+        drop.mesh.material.dispose();
+      });
+      state.drops = [];
+      state.strokes = [];
+      showToast('Canvas cleared');
+    });
+
+    // Export High-Res PNG Snapshot
+    document.getElementById('btn-export').addEventListener('click', () => {
+      renderer.render(scene, camera);
+      const dataURL = renderer.domElement.toDataURL('image/png');
+      const link = document.createElement('a');
+      link.download = `resin-gel-dots-${Date.now()}.png`;
+      link.href = dataURL;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      showToast('PNG artwork downloaded!');
+    });
+
+    // Toast helper
+    let toastTimer = null;
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      document.getElementById('toast-msg').textContent = msg;
+      toast.classList.remove('opacity-0', '-translate-y-2');
+      toast.classList.add('opacity-100', 'translate-y-0');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        toast.classList.remove('opacity-100', 'translate-y-0');
+        toast.classList.add('opacity-0', '-translate-y-2');
+      }, 1700);
+    }
+
+    // =========================================================================
+    // 8. PRE-POPULATE SAMPLE ARTISAN DROPS (INSPIRED BY REFERENCE PHOTO)
+    // =========================================================================
+    function spawnStarterDrops() {
+      const samples = [
+        { x:  48, y:  72, r: 44, swatch: RESIN_SWATCHES[0], formula: 0 }, // Emerald Teal
+        { x: -46, y:  14, r: 46, swatch: RESIN_SWATCHES[1], formula: 0 }, // Electric Cyan
+        { x:  58, y: -24, r: 43, swatch: RESIN_SWATCHES[3], formula: 1 }, // Amethyst Purple (with shimmer/flecks)
+        { x: -48, y: -88, r: 45, swatch: RESIN_SWATCHES[2], formula: 0 }  // Midnight Navy
+      ];
+
+      samples.forEach(s => {
+        state.selectedColor = s.swatch;
+        state.formula = s.formula === 1 ? 'shimmer' : 'jelly';
+        const drop = createDrop(s.x, s.y, s.r);
+        drop.isGrowing = false;
+        drop.springDisp = 0;
+        updateDropScale(drop);
+      });
+
+      // Set active nozzle gel to Neon Lime so user can immediately place a fresh lime drop!
+      state.selectedColor = RESIN_SWATCHES[4];
+      state.formula = 'jelly';
+      syncNozzleColor();
+      renderSwatches();
+      if (state.currentStroke.length > 0) {
+        state.strokes.push([...state.currentStroke]);
+        state.currentStroke = [];
+      }
+    }
+
+    // =========================================================================
+    // 9. RESIZE HANDLING & MAIN ANIMATION LOOP
+    // =========================================================================
+    window.addEventListener('resize', () => {
+      viewWidth = window.innerWidth;
+      viewHeight = window.innerHeight;
+
+      camera.left = -viewWidth / 2;
+      camera.right = viewWidth / 2;
+      camera.top = viewHeight / 2;
+      camera.bottom = -viewHeight / 2;
+      camera.updateProjectionMatrix();
+
+      renderer.setSize(viewWidth, viewHeight);
+      paperUniforms.uResolution.value.set(viewWidth, viewHeight);
+      paperPlane.geometry.dispose();
+      paperPlane.geometry = new THREE.PlaneGeometry(viewWidth, viewHeight);
+    });
+
+    let lastTime = performance.now();
+
+    function animate(now) {
+      requestAnimationFrame(animate);
+      const dt = Math.min((now - lastTime) / 1000, 0.05);
+      lastTime = now;
+
+      // 1. Update smooth 3D studio light parallax
+      const targetLightX = state.tiltEnabled ? state.mouseNDC.x : 0;
+      const targetLightY = state.tiltEnabled ? state.mouseNDC.y : 0;
+      state.smoothLightOffset.x += (targetLightX - state.smoothLightOffset.x) * 8.0 * dt;
+      state.smoothLightOffset.y += (targetLightY - state.smoothLightOffset.y) * 8.0 * dt;
+
+      paperUniforms.uLightDir.value.set(
+        -0.65 + state.smoothLightOffset.x * 0.25,
+         0.75 + state.smoothLightOffset.y * 0.25
+      );
+
+      // 2. Grow actively dispensed drop smoothly while holding down
+      if (state.isPressing && state.activeDrop && state.activeDrop.isGrowing) {
+        const maxR = state.dispenseMode === 'pearl' ? 24 : 74;
+        const growRate = state.dispenseMode === 'pearl' ? 35 : 28;
+        if (state.activeDrop.radius < maxR) {
+          state.activeDrop.radius += growRate * dt * (1.0 - state.activeDrop.radius / (maxR * 1.25));
+        }
+      }
+
+      // 3. Update jelly surface-tension spring wobble for all drops
+      for (let i = 0; i < state.drops.length; i++) {
+        const d = state.drops[i];
+        if (Math.abs(d.springDisp) > 0.0004 || Math.abs(d.springVel) > 0.0004) {
+          // Hooke's law underdamped spring for realistic liquid gel jiggle
+          const stiffness = 190.0;
+          const damping = 9.5;
+          const accel = -stiffness * d.springDisp - damping * d.springVel;
+          d.springVel += accel * dt;
+          d.springDisp += d.springVel * dt;
+          updateDropScale(d);
+        } else if (d.isGrowing) {
+          updateDropScale(d);
+        }
+      }
+
+      // 4. Update custom plastic applicator nozzle position & squeeze tilt
+      smoothNozzleX += (pointerX - smoothNozzleX) * 28.0 * dt;
+      smoothNozzleY += (pointerY - smoothNozzleY) * 28.0 * dt;
+      const pressScale = state.isPressing ? 0.94 : 1.0;
+      const pressShiftY = state.isPressing ? 3 : 0;
+      nozzleOverlay.style.transform = `translate3d(${smoothNozzleX - 18}px, ${smoothNozzleY - 18 + pressShiftY}px, 0) scale(${pressScale})`;
+
+      renderer.render(scene, camera);
+    }
+
+    // Initialize studio on window load
+    window.onload = function () {
+      spawnStarterDrops();
+      requestAnimationFrame(animate);
+    };
+  </script>
+</body>
+</html>
